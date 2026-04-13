@@ -8,12 +8,14 @@ import pandas as pd
 import requests
 
 # ─── CONFIG ───────────────────────────────────────────────
-import os
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-ALIBABA_API_KEY = os.getenv("ALIBABA_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+ALIBABA_API_KEY = os.environ.get("ALIBABA_API_KEY", "").strip()
 ALIBABA_BASE_URL = "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
 MEMORY_DIR = "memory"
 UPLOADS_DIR = "uploads"
+
+print(f"TOKEN LENGTH: {len(TELEGRAM_TOKEN)}")
+print(f"TOKEN STARTS: {TELEGRAM_TOKEN[:10] if TELEGRAM_TOKEN else 'EMPTY'}")
 
 os.makedirs(MEMORY_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -21,10 +23,7 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # ─── STEP 1: READ EXCEL & BUILD MEMORY ───────────────────
 def build_memory(df: pd.DataFrame, file_type: str):
-    """Convert raw Excel into organized .md memory files"""
-
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-
     if file_type == "invoices":
         _build_invoices_memory(df, now)
     elif file_type == "shipping_reply":
@@ -32,7 +31,6 @@ def build_memory(df: pd.DataFrame, file_type: str):
 
 
 def _build_invoices_memory(df: pd.DataFrame, now: str):
-    # ── ملخص الأسبوع ──────────────────────────────────────
     total = len(df)
     total_revenue = df["إجمالي الفاتورة (جنيه)"].sum()
     date_range = f"{df['تاريخ الفاتورة'].min()} إلى {df['تاريخ الفاتورة'].max()}"
@@ -47,7 +45,6 @@ def _build_invoices_memory(df: pd.DataFrame, now: str):
 """
     _save(summary, "ملخص_الاسبوع.md")
 
-    # ── المناطق ───────────────────────────────────────────
     regions = df.groupby("المحافظة").agg(
         عدد_الأوردرات=("رقم الفاتورة", "count"),
         إجمالي_الإيراد=("إجمالي الفاتورة (جنيه)", "sum")
@@ -55,12 +52,9 @@ def _build_invoices_memory(df: pd.DataFrame, now: str):
 
     regions_md = f"# تحليل المناطق\nآخر تحديث: {now}\n\n"
     for region, row in regions.iterrows():
-        regions_md += f"## {region}\n"
-        regions_md += f"- عدد الأوردرات: {row['عدد_الأوردرات']}\n"
-        regions_md += f"- الإيراد: {row['إجمالي_الإيراد']:,.0f} جنيه\n\n"
+        regions_md += f"## {region}\n- عدد الأوردرات: {row['عدد_الأوردرات']}\n- الإيراد: {row['إجمالي_الإيراد']:,.0f} جنيه\n\n"
     _save(regions_md, "المناطق.md")
 
-    # ── المنتجات ──────────────────────────────────────────
     products = df.groupby("المنتج").agg(
         عدد_العبوات=("الكمية", "sum"),
         إجمالي_الإيراد=("إجمالي الفاتورة (جنيه)", "sum")
@@ -68,27 +62,20 @@ def _build_invoices_memory(df: pd.DataFrame, now: str):
 
     products_md = f"# تحليل المنتجات\nآخر تحديث: {now}\n\n"
     for product, row in products.iterrows():
-        products_md += f"## {product}\n"
-        products_md += f"- عدد العبوات المباعة: {row['عدد_العبوات']}\n"
-        products_md += f"- الإيراد: {row['إجمالي_الإيراد']:,.0f} جنيه\n\n"
+        products_md += f"## {product}\n- عدد العبوات: {row['عدد_العبوات']}\n- الإيراد: {row['إجمالي_الإيراد']:,.0f} جنيه\n\n"
     _save(products_md, "المنتجات.md")
 
-    # ── التحليل اليومي ────────────────────────────────────
     daily = df.groupby("تاريخ الفاتورة").agg(
         عدد_الأوردرات=("رقم الفاتورة", "count"),
         إجمالي_الإيراد=("إجمالي الفاتورة (جنيه)", "sum")
     )
-
     daily_md = f"# التحليل اليومي\nآخر تحديث: {now}\n\n"
     for date, row in daily.iterrows():
-        daily_md += f"## {date}\n"
-        daily_md += f"- أوردرات: {row['عدد_الأوردرات']}\n"
-        daily_md += f"- إيراد: {row['إجمالي_الإيراد']:,.0f} جنيه\n\n"
+        daily_md += f"## {date}\n- أوردرات: {row['عدد_الأوردرات']}\n- إيراد: {row['إجمالي_الإيراد']:,.0f} جنيه\n\n"
     _save(daily_md, "التحليل_اليومي.md")
 
 
 def _build_shipping_reply_memory(df: pd.DataFrame, now: str):
-    # ── المرتجعات ─────────────────────────────────────────
     status_col = "حالة التوصيل"
     total = len(df)
     delivered = len(df[df[status_col] == "مسلّم"])
@@ -105,8 +92,6 @@ def _build_shipping_reply_memory(df: pd.DataFrame, now: str):
 - مرتجع: {returned} ({returned/total*100:.1f}%)
 - قيد التوصيل: {in_transit} ({in_transit/total*100:.1f}%)
 - فشل التوصيل: {failed} ({failed/total*100:.1f}%)
-
-## تفاصيل المرتجعات
 """
     returned_df = df[df[status_col] == "مرتجع"]
     if not returned_df.empty:
@@ -114,7 +99,6 @@ def _build_shipping_reply_memory(df: pd.DataFrame, now: str):
         returns_md += "\n### أسباب المرتجعات\n"
         for reason, count in reasons.items():
             returns_md += f"- {reason}: {count} حالة\n"
-
         returns_md += "\n### المرتجعات حسب المحافظة\n"
         region_returns = returned_df["المحافظة"].value_counts()
         for region, count in region_returns.items():
@@ -131,7 +115,6 @@ def _save(content: str, filename: str):
 
 # ─── STEP 2: READ MEMORY & TALK TO AI ────────────────────
 def read_memory() -> str:
-    """Read all memory files and combine them"""
     all_memory = ""
     for filename in os.listdir(MEMORY_DIR):
         if filename.endswith(".md"):
@@ -142,7 +125,6 @@ def read_memory() -> str:
 
 
 def ask_ai(question: str, memory: str) -> str:
-    """Send question + memory to AI and get answer"""
     system_prompt = """أنت مستشار أعمال ذكي لشركة مبيدات حشرية مصرية.
 عندك كل بيانات الشركة في ذاكرتك.
 بتتكلم بالعربي بشكل طبيعي وبسيط.
@@ -167,9 +149,9 @@ def ask_ai(question: str, memory: str) -> str:
             "max_tokens": 1000,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_message}]
-        }
+        },
+        timeout=30
     )
-
     data = response.json()
     return data["content"][0]["text"]
 
@@ -186,7 +168,6 @@ def detect_file_type(df: pd.DataFrame) -> str:
 
 # ─── STEP 4: TELEGRAM HANDLERS ───────────────────────────
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle Excel file uploads"""
     file = update.message.document
     if not file.file_name.endswith((".xlsx", ".xls")):
         await update.message.reply_text("❌ بعتلي ملف Excel بس (.xlsx)")
@@ -194,12 +175,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("⏳ جاري قراءة الملف...")
 
-    # Download file
     tg_file = await context.bot.get_file(file.file_id)
     file_path = os.path.join(UPLOADS_DIR, file.file_name)
     await tg_file.download_to_drive(file_path)
 
-    # Read and process
     df = pd.read_excel(file_path)
     file_type = detect_file_type(df)
 
@@ -225,10 +204,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text questions"""
     question = update.message.text
-
     memory = read_memory()
+
     if not memory.strip():
         await update.message.reply_text(
             "📂 مفيش بيانات عندي لسه\n"
@@ -238,12 +216,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("⏳ بفكر...")
 
-    answer = ask_ai(question, memory)
-    await update.message.reply_text(answer)
+    try:
+        answer = ask_ai(question, memory)
+        await update.message.reply_text(answer)
+    except Exception as e:
+        await update.message.reply_text(f"❌ حصل خطأ: {str(e)}")
 
 
 # ─── MAIN ─────────────────────────────────────────────────
 def main():
+    if not TELEGRAM_TOKEN:
+        raise ValueError("TELEGRAM_TOKEN is empty!")
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
